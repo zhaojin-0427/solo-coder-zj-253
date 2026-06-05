@@ -83,7 +83,12 @@ export function HUD() {
       {safetyCarActive && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 px-6 py-2 bg-yellow-500/90 text-racing-dark rounded-xl font-display font-bold flex items-center gap-2 animate-pulse z-40">
           <AlertTriangle className="w-5 h-5" />
-          安全车出动 | 剩余 {activeEvents.find(e => e.type === 'safety_car' && e.active)?.duration || 0} 圈
+          安全车出动 | 剩余 {(() => {
+            const safetyCarEvent = activeEvents.find(e => e.type === 'safety_car' && e.active);
+            if (!safetyCarEvent) return 0;
+            const remaining = Math.max(0, safetyCarEvent.duration - (currentLap - safetyCarEvent.startTime));
+            return remaining;
+          })()} 圈
         </div>
       )}
 
@@ -283,14 +288,35 @@ export function HUD() {
             <div className="text-sm text-racing-silver mb-2">
               加油量: {pitStopFuelAmount}kg
             </div>
-            <input
-              type="range"
-              min="20"
-              max={GAME_CONSTANTS.MAX_FUEL_LOAD - playerCar.fuel}
-              value={pitStopFuelAmount}
-              onChange={(e) => setPitStopFuelAmount(Number(e.target.value))}
-              className="w-full h-2 bg-racing-dark rounded-lg appearance-none cursor-pointer accent-racing-red"
-            />
+            {(() => {
+              const maxFuelAdd = Math.max(0, GAME_CONSTANTS.MAX_FUEL_LOAD - playerCar.fuel);
+              const minFuelAdd = Math.min(20, maxFuelAdd);
+              const adjustedFuelAmount = Math.min(Math.max(pitStopFuelAmount, minFuelAdd), maxFuelAdd);
+              
+              if (maxFuelAdd <= 0) {
+                return (
+                  <div className="text-sm text-green-400 bg-green-400/20 rounded-lg p-3 text-center">
+                    燃油已满，无需加油
+                  </div>
+                );
+              }
+              
+              if (pitStopFuelAmount > maxFuelAdd) {
+                setTimeout(() => setPitStopFuelAmount(adjustedFuelAmount), 0);
+              }
+              
+              return (
+                <input
+                  type="range"
+                  min={minFuelAdd}
+                  max={maxFuelAdd}
+                  value={adjustedFuelAmount}
+                  onChange={(e) => setPitStopFuelAmount(Number(e.target.value))}
+                  className="w-full h-2 bg-racing-dark rounded-lg appearance-none cursor-pointer accent-racing-red disabled:opacity-50"
+                  disabled={maxFuelAdd < minFuelAdd}
+                />
+              );
+            })()}
           </div>
 
           <button

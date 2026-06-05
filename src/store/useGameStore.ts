@@ -256,7 +256,32 @@ export const useGameStore = create<GameStore>((set, get) => ({
       get().setNotification('💥 事故发生！注意避让！', 'danger');
     } else if (event.type === 'undercut' && event.data?.opponentId) {
       const opponent = get().cars.find(c => c.id === event.data!.opponentId);
-      if (opponent) {
+      if (opponent && !opponent.pitStopPlanned && !opponent.inPit && !opponent.retired) {
+        const state = get();
+        const weather = state.weather;
+        const currentLap = state.currentLap;
+        const totalLaps = state.config?.totalLaps || 40;
+        
+        let nextTire: TireCompound;
+        if (weather === 'dry') {
+          if (opponent.tireWear > 0.6) {
+            nextTire = currentLap < totalLaps * 0.7 ? 'medium' : 'hard';
+          } else if (opponent.tireWear > 0.3) {
+            nextTire = currentLap < totalLaps * 0.5 ? 'soft' : 'medium';
+          } else {
+            nextTire = opponent.tireCompound === 'soft' ? 'medium' : 'soft';
+          }
+        } else {
+          nextTire = 'wet';
+        }
+        
+        const fuelNeeded = (totalLaps - currentLap) * GAME_CONSTANTS.FUEL_PER_LAP;
+        const fuelToAdd = Math.min(
+          GAME_CONSTANTS.MAX_FUEL_LOAD - opponent.fuel,
+          Math.max(20, fuelNeeded)
+        );
+        
+        get().callPitStop(opponent.id, nextTire, fuelToAdd);
         get().setNotification(`📊 ${opponent.name}执行Undercut策略，提前进站！`, 'warning');
       }
     }

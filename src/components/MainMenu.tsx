@@ -46,7 +46,11 @@ export function MainMenu() {
       aiOpponents: 9
     });
 
-    setView('race');
+    if (selectedMode === 'learning') {
+      setView('tutorial');
+    } else {
+      setView('race');
+    }
   };
 
   if (showSetup) {
