@@ -2,6 +2,7 @@ import { MainMenu } from '@/components/MainMenu';
 import { RaceView } from '@/components/RaceView';
 import { HighScores } from '@/components/HighScores';
 import { Tutorial } from '@/components/Tutorial';
+import { Results } from '@/components/Results';
 import { useUISTore } from '@/store/useUISTore';
 
 export default function App() {
@@ -13,6 +14,8 @@ export default function App() {
         return <MainMenu />;
       case 'race':
         return <RaceView />;
+      case 'results':
+        return <Results />;
       case 'highscores':
         return <HighScores />;
       case 'tutorial':

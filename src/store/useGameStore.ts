@@ -7,7 +7,13 @@ import type {
   Weather,
   TireCompound,
   PitStopResult,
-  StrategyFeedback
+  StrategyFeedback,
+  TireUsageRecord,
+  EventTimelineItem,
+  StrategySuggestion,
+  RaceResult,
+  RaceSummary,
+  LearningFeedback
 } from '@/types/game';
 import {
   GAME_CONSTANTS,
@@ -16,7 +22,7 @@ import {
   CAR_COLORS,
   DRIVER_NAMES
 } from '@/game/config/constants';
-import { generateId, calculateScore } from '@/utils/helpers';
+import { generateId, calculateScore, generateStrategySuggestions, generateRaceSummary, generateLearningFeedback } from '@/utils/helpers';
 import { saveHighScore } from '@/utils/storage';
 
 interface GameStore {
@@ -38,6 +44,12 @@ interface GameStore {
   config: RaceConfig | null;
   notification: { message: string; type: 'info' | 'warning' | 'danger' } | null;
   showNotification: boolean;
+  tireUsageHistory: TireUsageRecord[];
+  eventTimeline: EventTimelineItem[];
+  weatherHistory: Array<{ lap: number; from: Weather; to: Weather; raceTime: number }>;
+  safetyCarPeriods: Array<{ startLap: number; endLap: number; startTime: number }>;
+  raceResult: RaceResult | null;
+  lastRaceResult: RaceResult | null;
 
   initRace: (config: RaceConfig) => void;
   updateCar: (carId: string, updates: Partial<CarState>) => void;
@@ -60,6 +72,12 @@ interface GameStore {
   setStrategyFeedback: (feedback: StrategyFeedback) => void;
   activateSafetyCar: (laps: number) => void;
   deactivateSafetyCar: () => void;
+  recordTireChange: (carId: string, newCompound: TireCompound, lap: number) => void;
+  recordEventToTimeline: (event: Omit<EventTimelineItem, 'id'>) => void;
+  recordWeatherChange: (from: Weather, to: Weather, lap: number) => void;
+  retirePlayer: (reason: string) => void;
+  generateRaceResult: () => RaceResult | null;
+  clearRaceResult: () => void;
 }
 
 function createInitialCarState(
@@ -120,6 +138,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
   config: null,
   notification: null,
   showNotification: false,
+  tireUsageHistory: [],
+  eventTimeline: [],
+  weatherHistory: [],
+  safetyCarPeriods: [],
+  raceResult: null,
+  lastRaceResult: null,
 
   initRace: (config: RaceConfig) => {
     const cars: CarState[] = [];
@@ -131,6 +155,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     for (let i = 0; i < config.aiOpponents; i++) {
       cars.push(createInitialCarState(i, false, config));
     }
+    
+    const initialTireRecord: TireUsageRecord = {
+      compound: config.startingTire,
+      startLap: 0,
+      endLap: 0,
+      stintLaps: 0,
+      avgWearRate: 0
+    };
     
     set({
       config,
@@ -148,7 +180,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       safetyCarLapsRemaining: 0,
       activeEvents: [],
       pitStopResults: [],
-      strategyFeedback: null
+      strategyFeedback: null,
+      tireUsageHistory: [initialTireRecord],
+      eventTimeline: [],
+      weatherHistory: [],
+      safetyCarPeriods: [],
+      raceResult: null
     });
     
     get().calculatePositions();
@@ -207,6 +244,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       positionsLost: 0
     };
 
+    if (car.isPlayer && nextTire !== car.tireCompound) {
+      get().recordTireChange(carId, nextTire, car.lap);
+    }
+
     set(state => ({
       cars: state.cars.map(c =>
         c.id === carId
@@ -246,18 +287,26 @@ export const useGameStore = create<GameStore>((set, get) => ({
       activeEvents: [...state.activeEvents, newEvent]
     }));
 
+    const state = get();
+    let description = '';
+    
     if (event.type === 'rain') {
-      set({ targetWeather: event.data?.intensity || 'light_rain' });
+      const intensity = event.data?.intensity as Weather || 'light_rain';
+      set({ targetWeather: intensity });
+      description = intensity === 'dry' ? '天气转晴，赛道逐渐变干' : 
+        `${intensity === 'heavy_rain' ? '大' : '小'}雨来袭，请考虑更换雨胎`;
       get().setNotification('⚠️ 注意！天气变化，即将降雨！', 'warning');
     } else if (event.type === 'safety_car') {
+      description = `安全车出动，将持续${event.duration}圈`;
       get().activateSafetyCar(event.duration);
       get().setNotification('🚨 安全车出动！所有车辆必须减速！', 'danger');
     } else if (event.type === 'crash') {
+      description = '赛道上发生事故，请小心驾驶';
       get().setNotification('💥 事故发生！注意避让！', 'danger');
     } else if (event.type === 'undercut' && event.data?.opponentId) {
       const opponent = get().cars.find(c => c.id === event.data!.opponentId);
+      description = opponent ? `${opponent.name}执行Undercut策略，提前进站` : '对手执行Undercut策略';
       if (opponent && !opponent.pitStopPlanned && !opponent.inPit && !opponent.retired) {
-        const state = get();
         const weather = state.weather;
         const currentLap = state.currentLap;
         const totalLaps = state.config?.totalLaps || 40;
@@ -285,6 +334,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
         get().setNotification(`📊 ${opponent.name}执行Undercut策略，提前进站！`, 'warning');
       }
     }
+
+    get().recordEventToTimeline({
+      type: event.type,
+      lap: event.lap,
+      raceTime: state.raceTime,
+      description,
+      data: event.data
+    });
   },
 
   deactivateEvent: (eventId) => {
@@ -310,10 +367,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const newProgress = Math.min(1, state.weatherTransitionProgress + deltaTime * transitionSpeed);
 
     if (newProgress >= 1) {
+      const oldWeather = state.weather;
+      const newWeather = state.targetWeather;
       set({
-        weather: state.targetWeather,
+        weather: newWeather,
         weatherTransitionProgress: 0
       });
+      get().recordWeatherChange(oldWeather, newWeather, state.currentLap);
     } else {
       set({ weatherTransitionProgress: newProgress });
     }
@@ -349,28 +409,29 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const playerCar = state.cars.find(c => c.id === state.playerCarId);
     
     if (playerCar && state.config) {
-      const score = calculateScore(
-        playerCar.position,
-        playerCar.totalTime,
-        playerCar.bestLapTime,
-        playerCar.pitStops,
-        state.config.difficulty
-      );
-
-      saveHighScore({
-        id: generateId(),
-        trackId: state.config.trackId,
-        trackName: state.config.trackName,
-        difficulty: state.config.difficulty,
-        position: playerCar.position,
-        totalTime: playerCar.totalTime,
-        bestLapTime: playerCar.bestLapTime,
-        pitStops: playerCar.pitStops,
-        score,
-        tiresUsed: [],
-        retired: playerCar.retired,
-        date: Date.now()
-      });
+      const raceResult = get().generateRaceResult();
+      
+      if (raceResult) {
+        const summaryText = `${raceResult.summary.keyMoments.slice(0, 2).join('；')}`;
+        
+        saveHighScore({
+          id: generateId(),
+          trackId: state.config.trackId,
+          trackName: state.config.trackName,
+          difficulty: state.config.difficulty,
+          position: playerCar.position,
+          totalTime: playerCar.totalTime,
+          bestLapTime: playerCar.bestLapTime,
+          pitStops: playerCar.pitStops,
+          score: raceResult.score,
+          tiresUsed: raceResult.tireUsage.map(t => t.compound),
+          retired: playerCar.retired,
+          date: Date.now(),
+          raceResult,
+          summary: summaryText,
+          mode: state.config.mode
+        });
+      }
     }
 
     set({ raceState: 'finished' });
@@ -384,7 +445,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       cars: [],
       activeEvents: [],
       pitStopResults: [],
-      strategyFeedback: null
+      strategyFeedback: null,
+      tireUsageHistory: [],
+      eventTimeline: [],
+      weatherHistory: [],
+      safetyCarPeriods: [],
+      raceResult: null
     });
   },
 
@@ -422,17 +488,174 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   activateSafetyCar: (laps) => {
+    const state = get();
     set({
       safetyCarActive: true,
-      safetyCarLapsRemaining: laps
+      safetyCarLapsRemaining: laps,
+      safetyCarPeriods: [...state.safetyCarPeriods, {
+        startLap: state.currentLap,
+        endLap: state.currentLap + laps,
+        startTime: state.raceTime
+      }]
     });
   },
 
   deactivateSafetyCar: () => {
+    const state = get();
+    const updatedPeriods = [...state.safetyCarPeriods];
+    if (updatedPeriods.length > 0) {
+      updatedPeriods[updatedPeriods.length - 1].endLap = state.currentLap;
+    }
     set({
       safetyCarActive: false,
-      safetyCarLapsRemaining: 0
+      safetyCarLapsRemaining: 0,
+      safetyCarPeriods: updatedPeriods
     });
     get().setNotification('安全车已离开，比赛恢复！', 'info');
+  },
+
+  recordTireChange: (carId, newCompound, lap) => {
+    set(state => {
+      const car = state.cars.find(c => c.id === carId);
+      if (!car) return state;
+
+      const updatedHistory = [...state.tireUsageHistory];
+      if (updatedHistory.length > 0) {
+        const lastRecord = updatedHistory[updatedHistory.length - 1];
+        lastRecord.endLap = lap;
+        lastRecord.stintLaps = lap - lastRecord.startLap;
+        lastRecord.avgWearRate = car.tireWear / Math.max(1, lastRecord.stintLaps);
+      }
+
+      updatedHistory.push({
+        compound: newCompound,
+        startLap: lap,
+        endLap: lap,
+        stintLaps: 0,
+        avgWearRate: 0
+      });
+
+      return { tireUsageHistory: updatedHistory };
+    });
+  },
+
+  recordEventToTimeline: (event) => {
+    set(state => ({
+      eventTimeline: [...state.eventTimeline, { ...event, id: generateId() }]
+    }));
+  },
+
+  recordWeatherChange: (from, to, lap) => {
+    const state = get();
+    set(s => ({
+      weatherHistory: [...s.weatherHistory, {
+        lap,
+        from,
+        to,
+        raceTime: state.raceTime
+      }]
+    }));
+  },
+
+  retirePlayer: (reason) => {
+    const state = get();
+    const playerCar = state.cars.find(c => c.id === state.playerCarId);
+    if (!playerCar || playerCar.retired) return;
+
+    set(s => ({
+      cars: s.cars.map(c =>
+        c.id === s.playerCarId
+          ? { ...c, retired: true, retirementReason: reason }
+          : c
+      )
+    }));
+
+    get().finishRace();
+  },
+
+  generateRaceResult: () => {
+    const state = get();
+    const playerCar = state.cars.find(c => c.id === state.playerCarId);
+    if (!playerCar || !state.config) return null;
+
+    const score = calculateScore(
+      playerCar.position,
+      playerCar.totalTime,
+      playerCar.bestLapTime,
+      playerCar.pitStops,
+      state.config.difficulty
+    );
+
+    const tireUsage = [...state.tireUsageHistory];
+    if (tireUsage.length > 0) {
+      const lastRecord = tireUsage[tireUsage.length - 1];
+      lastRecord.endLap = playerCar.lap;
+      lastRecord.stintLaps = playerCar.lap - lastRecord.startLap;
+      lastRecord.avgWearRate = playerCar.tireWear / Math.max(1, lastRecord.stintLaps);
+    }
+
+    const playerPitStops = state.pitStopResults.filter(p => p.carId === state.playerCarId);
+    const weatherChanges = state.weatherHistory.map(w => ({
+      lap: w.lap,
+      from: w.from,
+      to: w.to
+    }));
+    const safetyCarPeriods = state.safetyCarPeriods.map(p => ({
+      startLap: p.startLap,
+      endLap: p.endLap
+    }));
+
+    const strategySuggestions = generateStrategySuggestions(
+      playerCar,
+      state.config,
+      tireUsage,
+      state.eventTimeline,
+      weatherChanges,
+      safetyCarPeriods
+    );
+
+    const summary = generateRaceSummary(
+      playerCar,
+      state.config,
+      state.eventTimeline,
+      playerPitStops,
+      score
+    );
+
+    const raceResult: RaceResult = {
+      id: generateId(),
+      finalPosition: playerCar.position,
+      totalTime: playerCar.totalTime,
+      bestLapTime: playerCar.bestLapTime,
+      lapsCompleted: playerCar.lap,
+      retired: playerCar.retired,
+      retirementReason: playerCar.retirementReason,
+      score,
+      tireUsage,
+      pitStops: playerPitStops,
+      eventTimeline: state.eventTimeline,
+      strategySuggestions,
+      summary,
+      weatherChanges,
+      safetyCarPeriods
+    };
+
+    if (state.config.mode === 'learning') {
+      raceResult.learningFeedback = generateLearningFeedback(
+        playerCar,
+        state.eventTimeline,
+        tireUsage,
+        state.weatherHistory,
+        state.safetyCarPeriods,
+        playerPitStops
+      );
+    }
+
+    set({ raceResult, lastRaceResult: raceResult });
+    return raceResult;
+  },
+
+  clearRaceResult: () => {
+    set({ raceResult: null });
   }
 }));

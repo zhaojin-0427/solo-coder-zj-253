@@ -393,6 +393,13 @@ export class RaceScene extends Phaser.Scene {
         retired,
         retirementReason
       });
+
+      if (carState.isPlayer && retired && !carState.retired) {
+        setTimeout(() => {
+          useGameStore.getState().finishRace();
+          useUISTore.getState().setView('results');
+        }, 1000);
+      }
     });
   }
 

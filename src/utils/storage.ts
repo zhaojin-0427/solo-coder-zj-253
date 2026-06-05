@@ -1,7 +1,23 @@
-import type { HighScore } from '@/types/game';
+import type { HighScore, TireCompound } from '@/types/game';
 
 const STORAGE_KEY = 'f1_strategy_highscores';
 const MAX_SCORES = 10;
+
+function migrateOldScore(score: any): HighScore {
+  if (!score.tiresUsed) {
+    score.tiresUsed = [] as TireCompound[];
+  }
+  if (score.retired === undefined) {
+    score.retired = false;
+  }
+  if (!score.mode) {
+    score.mode = 'grand_prix';
+  }
+  if (!score.summary) {
+    score.summary = '';
+  }
+  return score as HighScore;
+}
 
 export function saveHighScore(score: HighScore): void {
   try {
@@ -19,7 +35,8 @@ export function getHighScores(): HighScore[] {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      return parsed.map(migrateOldScore);
     }
   } catch (error) {
     console.error('Failed to load high scores:', error);

@@ -124,6 +124,95 @@ export interface StrategyFeedback {
   suggestions: string[];
 }
 
+export interface TireUsageRecord {
+  compound: TireCompound;
+  startLap: number;
+  endLap: number;
+  stintLaps: number;
+  avgWearRate: number;
+}
+
+export interface EventTimelineItem {
+  id: string;
+  type: EventType;
+  lap: number;
+  raceTime: number;
+  description: string;
+  duration?: number;
+  data?: Record<string, any>;
+  playerReactionTime?: number;
+}
+
+export interface StrategySuggestion {
+  id: string;
+  category: 'tire' | 'fuel' | 'pit' | 'weather' | 'safety';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  referenceLap: number;
+  outcome?: 'better' | 'worse' | 'neutral';
+}
+
+export interface RaceSummary {
+  keyMoments: string[];
+  strategyEffectiveness: number;
+  bestDecision: string;
+  worstDecision: string;
+  totalScore: number;
+}
+
+export interface LearningFeedbackItem {
+  category: 'rain' | 'tire' | 'fuel' | 'safety_car';
+  timing: 'excellent' | 'good' | 'average' | 'poor';
+  description: string;
+  reactionTime?: number;
+  suggestion: string;
+}
+
+export interface LearningFeedback {
+  overall: 'excellent' | 'good' | 'average' | 'poor';
+  score: number;
+  items: LearningFeedbackItem[];
+  summary: string;
+}
+
+export interface RaceResult {
+  id: string;
+  finalPosition: number;
+  totalTime: number;
+  bestLapTime: number;
+  lapsCompleted: number;
+  retired: boolean;
+  retirementReason: string | null;
+  score: number;
+  tireUsage: TireUsageRecord[];
+  pitStops: PitStopResult[];
+  eventTimeline: EventTimelineItem[];
+  strategySuggestions: StrategySuggestion[];
+  summary: RaceSummary;
+  learningFeedback?: LearningFeedback;
+  weatherChanges: Array<{ lap: number; from: Weather; to: Weather }>;
+  safetyCarPeriods: Array<{ startLap: number; endLap: number }>;
+}
+
+export interface HighScore {
+  id: string;
+  trackId: string;
+  trackName: string;
+  difficulty: Difficulty;
+  position: number;
+  totalTime: number;
+  bestLapTime: number;
+  pitStops: number;
+  score: number;
+  tiresUsed: TireCompound[];
+  retired: boolean;
+  date: number;
+  raceResult?: RaceResult;
+  summary?: string;
+  mode?: GameMode;
+}
+
 export interface TutorialStep {
   id: number;
   title: string;
