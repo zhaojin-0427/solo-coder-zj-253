@@ -74,6 +74,8 @@ export function Results() {
       case 'safety_car': return <AlertTriangle className="w-4 h-4" />;
       case 'crash': return <AlertCircle className="w-4 h-4" />;
       case 'undercut': return <Zap className="w-4 h-4" />;
+      case 'finish': return <Flag className="w-4 h-4" />;
+      case 'retire': return <AlertCircle className="w-4 h-4" />;
       default: return <Flag className="w-4 h-4" />;
     }
   };
@@ -84,6 +86,8 @@ export function Results() {
       case 'safety_car': return 'bg-yellow-500';
       case 'crash': return 'bg-red-500';
       case 'undercut': return 'bg-orange-500';
+      case 'finish': return 'bg-green-500';
+      case 'retire': return 'bg-red-600';
       default: return 'bg-gray-500';
     }
   };

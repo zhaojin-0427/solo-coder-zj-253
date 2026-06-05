@@ -8,7 +8,7 @@ export type GameMode = 'grand_prix' | 'learning';
 
 export type RaceState = 'countdown' | 'running' | 'paused' | 'finished';
 
-export type EventType = 'safety_car' | 'rain' | 'crash' | 'undercut';
+export type EventType = 'safety_car' | 'rain' | 'crash' | 'undercut' | 'finish' | 'retire';
 
 export interface TireStats {
   grip: number;

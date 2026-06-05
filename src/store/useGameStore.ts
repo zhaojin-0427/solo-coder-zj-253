@@ -406,9 +406,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   finishRace: () => {
     const state = get();
+    
+    if (state.raceState === 'finished') {
+      return;
+    }
+    
     const playerCar = state.cars.find(c => c.id === state.playerCarId);
     
     if (playerCar && state.config) {
+      get().recordEventToTimeline({
+        type: playerCar.retired ? 'retire' : 'finish',
+        lap: playerCar.lap,
+        raceTime: state.raceTime,
+        description: playerCar.retired 
+          ? `比赛结束 - 因${playerCar.retirementReason}退赛` 
+          : '比赛结束 - 顺利完赛'
+      });
+      
       const raceResult = get().generateRaceResult();
       
       if (raceResult) {
@@ -569,8 +583,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
           : c
       )
     }));
-
-    get().finishRace();
   },
 
   generateRaceResult: () => {
